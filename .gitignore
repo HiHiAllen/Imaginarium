@@ -1,0 +1,33 @@
+__pycache__/
+*.pyc
+.cache/
+.DS_Store
+.vscode/
+.idea/
+.pytest_cache/
+.specstory/
+
+# 文件夹
+asset_data/
+weights/
+third_party/
+saved_results/
+logs/
+third_party/*
+
+# 个人文件
+config/config_previous_dataset.yaml
+config/config.yaml
+ 
+demo/demo_2.png
+demo/demo_3.png
+demo/demo_4.png
+demo/demo_5.png
+
+*.pth
+*.tar*
+*.gz
+
+# 这些不排除在外 保持更新
+!asset_data/imaginarium_asset_info.csv
+!config/config-example.yaml

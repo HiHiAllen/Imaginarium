@@ -1,0 +1,43 @@
+defaults:
+  - _self_
+
+shared: &shared
+  gpt_key: "sk-xxxxxxxxxxxx"
+  gpt_endpoint: "http://xxxxxxxxxxx"
+  gpt_model: "anthropic/claude-sonnet-4-5-20250929" # 最近的调试基于claude-sonnet-4-5-20250929，速度和性能平衡
+  ground_dino_token: "xxxxxxxxxxxx"
+  fbx_csv_path: "asset_data/imaginarium_asset_info.csv"
+  font_ttf_path: "utils/Arial.ttf"
+  assets_render_result_folder: &assets_folder "asset_data/imaginarium_assets_render_results"
+  ori_dino_weights_path: "weights/dinov2_vitl14.pth" # 原始DINOv2权重路径
+  enable_secondary_inspection: false
+  box_threshold: 0.1
+  hierarchical_traversal_times: 3
+
+S0_geometry_pred:
+  encoder: "vitl"
+  load_from: "weights/depth_anything_v2_metric_hypersim_vitl.pth"
+  max_depth: 20
+  save_parent_folder: "saved_results"
+  <<: *shared
+
+S1_scene_parsing:
+  <<: *shared
+
+S2_3d_retrieval:
+  asset_embedding_folder: "asset_data/imaginarium_assets_patch_embedding"
+  texture_embeddings_path: "asset_data/background_texture_dataset/texture_embeddings.pkl"
+  <<: *shared
+
+S3_pose_inference:
+  template_dir: *assets_folder
+  use_homography: "True"
+  ae_net_weights_path: "weights/ae_net_pretrained_weights.pth"
+  <<: *shared
+
+S4_blender_layout_and_corr:
+  placeable_area_info_folder: "asset_data/imaginarium_assets_internal_placement_space"
+  base_fbx_path: "asset_data/imaginarium_assets"
+  precomputed_voxel_dir: "asset_data/imaginarium_assets_voxels"
+  frame_length: 150
+  <<: *shared
