@@ -677,11 +677,15 @@ class BlenderManager:
         self.process_other_objects(ground_name, obj_list, tree_sons, ground_max_z + ground_height)
 
     def adjust_descendants(self, obj_id, obj_list, tree_sons, delta_z):
-        """递归调整物体及其所有后代的z位置"""
+        """递归调整物体及其所有后代的z位置（包括 inside 关系的物体）"""
         if obj_id in tree_sons:
             for son in tree_sons[obj_id]:
-                if son in obj_list:
-                    obj_list[son].location.z += delta_z
+                # 优先从 obj_list 获取，如果不在则从 Blender 场景中直接获取
+                # 这样可以处理 inside 关系的物体（它们不在 obj_list 中）
+                obj = obj_list.get(son) or bpy.data.objects.get(son)
+                if obj:
+                    print(f"adjusting {son} location.z from {obj.location.z} to {obj.location.z + delta_z}")
+                    obj.location.z += delta_z
                     self.adjust_descendants(son, obj_list, tree_sons, delta_z)
 
     def process_other_objects(self, parent_id, obj_list, tree_sons, parent_height):
@@ -699,10 +703,16 @@ class BlenderManager:
                 
                 # 如果子物体高于父物体且差异超过20cm，调整子物体位置
                 if son_min_z > parent_max_z and son_min_z - parent_max_z > 0.2:
-                    obj_list[son].location.z -= (son_min_z - parent_max_z - 0.2)
+                    delta_z = -(son_min_z - parent_max_z - 0.2)
+                    obj_list[son].location.z += delta_z
+                    # 同步更新 son 的所有后代物体
+                    self.adjust_descendants(son, obj_list, tree_sons, delta_z)
                 # 如果子物体的下表面在父物体的上表面下方，调整子物体位置
                 elif son_min_z < parent_max_z:
-                    obj_list[son].location.z += (parent_max_z - son_min_z)
+                    delta_z = parent_max_z - son_min_z
+                    obj_list[son].location.z += delta_z
+                    # 同步更新 son 的所有后代物体
+                    self.adjust_descendants(son, obj_list, tree_sons, delta_z)
                 
                 # 递归处理子物体
                 self.process_other_objects(son, obj_list, tree_sons, son_max_z - son_min_z + parent_height)
@@ -2495,6 +2505,91 @@ def align_closest_axis_to_world_z(obj):
         obj.matrix_world = rotation_matrix @ obj.matrix_world
         obj.matrix_world.translation = translation
         bpy.context.view_layer.update()
+
+def align_carpet_z_to_world_z_positive(obj):
+    """
+    强制将地毯的局部 Z 轴正方向对齐到世界 Z 轴正方向（朝上）
+    然后绕 Z 轴旋转最小角度，使地毯的 X 轴与最近墙的法向对齐
+    这确保地毯平铺在地面上，正面朝上，且与墙壁平行/垂直
+    """
+    # Step 1: 将地毯的 Z 轴正方向对齐到世界 Z 轴正方向
+    local_z_world = obj.matrix_world.to_3x3() @ Vector((0, 0, 1))
+    local_z_world.normalize()
+    
+    world_z = Vector((0, 0, 1))
+    
+    # 计算旋转轴和角度
+    rotation_axis = local_z_world.cross(world_z)
+    angle = local_z_world.angle(world_z)
+    
+    if rotation_axis.length > 1e-6:
+        rotation_axis.normalize()
+        rotation_matrix = Matrix.Rotation(angle, 4, rotation_axis)
+        
+        translation = obj.matrix_world.to_translation()
+        obj.matrix_world = rotation_matrix @ obj.matrix_world
+        obj.matrix_world.translation = translation
+        bpy.context.view_layer.update()
+    elif local_z_world.dot(world_z) < 0:
+        # 如果 Z 轴完全相反（旋转轴长度接近 0 但点积为负），需要翻转 180 度
+        rotation_matrix = Matrix.Rotation(math.pi, 4, Vector((1, 0, 0)))
+        translation = obj.matrix_world.to_translation()
+        obj.matrix_world = rotation_matrix @ obj.matrix_world
+        obj.matrix_world.translation = translation
+        bpy.context.view_layer.update()
+    
+    # Step 2: 绕 Z 轴旋转最小角度，使地毯 X 轴与最近墙的法向对齐
+    # 收集所有墙的法向（投影到 XY 平面）
+    wall_normals = []
+    for wall_obj in bpy.data.objects:
+        if re.match(r'^wall_\d+$', wall_obj.name):
+            # 墙的法向是其局部 Z 轴在世界坐标系中的方向
+            wall_normal = wall_obj.matrix_world.to_3x3() @ Vector((0, 0, 1))
+            wall_normal.z = 0  # 投影到 XY 平面
+            if wall_normal.length > 1e-6:
+                wall_normal.normalize()
+                wall_normals.append(wall_normal)
+    
+    if not wall_normals:
+        return  # 没有墙，无法对齐
+    
+    # 获取地毯当前的 X 轴方向（投影到 XY 平面）
+    carpet_x = obj.matrix_world.to_3x3() @ Vector((1, 0, 0))
+    carpet_x.z = 0
+    if carpet_x.length < 1e-6:
+        return  # X 轴几乎垂直，无法在 XY 平面对齐
+    carpet_x.normalize()
+    
+    # 找到需要旋转的最小角度
+    # 考虑墙法向的正负方向（因为对齐到 +normal 或 -normal 都可以）
+    min_angle = float('inf')
+    best_rotation = 0
+    
+    for wall_normal in wall_normals:
+        # 检查正方向和负方向
+        for sign in [1, -1]:
+            target = wall_normal * sign
+            # 计算从 carpet_x 到 target 的旋转角度（绕 Z 轴）
+            dot = carpet_x.dot(target)
+            dot = max(-1, min(1, dot))  # 限制在 [-1, 1] 范围内
+            angle = math.acos(dot)
+            
+            # 确定旋转方向
+            cross = carpet_x.cross(target)
+            if cross.z < 0:
+                angle = -angle
+            
+            if abs(angle) < abs(min_angle):
+                min_angle = angle
+                best_rotation = angle
+    
+    # 应用绕 Z 轴的旋转
+    if abs(best_rotation) > 1e-6:
+        rotation_matrix = Matrix.Rotation(best_rotation, 4, Vector((0, 0, 1)))
+        translation = obj.matrix_world.to_translation()
+        obj.matrix_world = rotation_matrix @ obj.matrix_world
+        obj.matrix_world.translation = translation
+        bpy.context.view_layer.update()
         
 def move_obj_along_closest_axis_to_z(obj, target_obj):
     # 找到 target_obj 的最近轴
@@ -3408,7 +3503,12 @@ def layout(obj_placement_info_json_path, placeable_area_info_folder, base_fbx_pa
         if parent and not re.match(r'^wall_\d+', parent) and obj_info.get("SpatialRel") == "on":
             tree_sons.setdefault(parent, []).append(obj_name)
         if not re.match(r'^wall_\d+', obj.name):  # 所有物体都立正
-            align_closest_axis_to_world_z(obj)
+            if re.match(r'^(carpet|rug)_\d+', obj.name):
+                # 现有位姿估计算法对大平面薄物体预测效果差，比如墙面、地毯等；
+                # 地毯特殊处理：确保 Z 轴正方向与世界 Z 轴正方向（地面法向）一致
+                align_carpet_z_to_world_z_positive(obj)
+            else:
+                align_closest_axis_to_world_z(obj)
             
     # 检查tree_sons, 处理循环依赖
     tree_sons, output_data_s2["obj_info"] = process_circular_dependencies(tree_sons, output_data_s2["obj_info"])
@@ -3567,35 +3667,10 @@ def layout(obj_placement_info_json_path, placeable_area_info_folder, base_fbx_pa
                     if SpatialRel == "inside":
                         sub_objs_info_list.append((name, closest_subspace_info))
                         closest_subspace_mapping[closest_subspace_info['name']].append(name)
-            
-            # [Fix] 构建完整的 obj_list 以确保 RelativePoseManager 能找到所有物体
-            full_obj_list = {}
-            for o in bpy.data.objects:
-                if o.type == 'MESH':
-                    full_obj_list[o.name] = o
-
-            # 使用 RelativePoseManager 来管理子物体跟随
-            pose_manager = RelativePoseManager(full_obj_list, tree_sons, output_data_s2)
 
             for sub_objs_info in sub_objs_info_list:
                 name, closest_subspace_info = sub_objs_info
-                
-                # [Fix] 在移动物体前，记录其子物体的相对位姿
-                obj = bpy.data.objects[name]
-                current_sons = tree_sons.get(name, [])
-                pose_manager.relative_poses = {} # 清空之前的记录
-                pose_manager.record_relative_poses(obj, current_sons)
-
                 align_obj_to_closest_subspace(name, closest_subspace_info)
-                
-                # [Fix] 移动后，恢复子物体的相对位姿 (即带动子物体一起移动)
-                pose_manager.restore_relative_poses(obj, current_sons)
-                
-                # ⚡ 性能优化：移除循环内的视图更新
-                # bpy.context.view_layer.update()
-            
-            # ⚡ 性能优化：批量更新场景（替代对齐循环内的多次更新）
-            if sub_objs_info_list:
                 bpy.context.view_layer.update()
             
             # 解决碰撞
@@ -3604,8 +3679,7 @@ def layout(obj_placement_info_json_path, placeable_area_info_folder, base_fbx_pa
                 subspace_obj = bpy.data.objects[subspace_name]
                 objects_in_subspace = [bpy.data.objects[name] for name in obj_list]
                 items_failed_and_del.extend(resolve_collisions_in_subspace(objects_in_subspace, subspace_obj))
-                # ⚡ 性能优化：移除循环内的视图更新
-                # bpy.context.view_layer.update()
+                bpy.context.view_layer.update()
             
             # ⚡ 性能优化：批量更新场景（替代碰撞循环内的多次更新）
             if closest_subspace_mapping:
@@ -3627,7 +3701,7 @@ def layout(obj_placement_info_json_path, placeable_area_info_folder, base_fbx_pa
         if obj_name == scene_camera_name or obj_info.get("SpatialRel") == "inside":
             continue
         obj_list[obj_name] = obj
-
+    
     # 处理on的z轴空间关系
     blender_manager.process_z(ground_name, obj_list, tree_sons, 0)
     bpy.context.view_layer.update()
@@ -3647,11 +3721,11 @@ def layout(obj_placement_info_json_path, placeable_area_info_folder, base_fbx_pa
     with open(output_path, 'w') as f:
         json.dump(output_data_s2, f, indent=2)
 
-    # 渲染场景
-    bpy.context.scene.camera = bpy.data.objects[scene_camera_name]
-    output_path = os.path.join(output_folder, f'{scene_name}_render_s2.png')
-    blender_manager.render_scene(output_path, resolution_x, resolution_y)
-    print(f"S3 render_s2 poses saved to: {output_path}", flush=True)
+    # # 渲染场景
+    # bpy.context.scene.camera = bpy.data.objects[scene_camera_name]
+    # output_path = os.path.join(output_folder, f'{scene_name}_render_s2.png')
+    # blender_manager.render_scene(output_path, resolution_x, resolution_y)
+    # print(f"S3 render_s2 poses saved to: {output_path}", flush=True)
 
     # s3
     output_data_s3 = copy.deepcopy(output_data_s2)
@@ -3867,7 +3941,7 @@ def layout(obj_placement_info_json_path, placeable_area_info_folder, base_fbx_pa
                 # 否则作为active
                 obj = bpy.data.objects[instance_id]
                 current_matrix = Matrix(info["pose_matrix_for_blender"])
-                current_matrix[2][3] += 0.01  # z坐标 +0.01
+                current_matrix[2][3] += 0.02  # z坐标 +0.01
                 obj.matrix_world = current_matrix
                 info["pose_matrix_for_blender"] = [list(row) for row in current_matrix]
                 active_objects.append(obj)
@@ -3875,7 +3949,7 @@ def layout(obj_placement_info_json_path, placeable_area_info_folder, base_fbx_pa
             # 非一级物体（二级及以上）也作为active
             obj = bpy.data.objects[instance_id]
             current_matrix = Matrix(info["pose_matrix_for_blender"])
-            current_matrix[2][3] += 0.01  # z坐标 +0.01
+            current_matrix[2][3] += 0.02  # z坐标 +0.01
             obj.matrix_world = current_matrix
             info["pose_matrix_for_blender"] = [list(row) for row in current_matrix]
             active_objects.append(obj)
@@ -3969,7 +4043,7 @@ def layout(obj_placement_info_json_path, placeable_area_info_folder, base_fbx_pa
     else:
         print(f"[PhysicsSimulation] 未检测到干涉")
     
-    duration = 0.5  # 默认1秒
+    duration = 1  # 默认1秒
     print(f"[PhysicsSimulation] 最终Active物体数: {len(active_objects)}, Passive物体数: {len(passive_objects)}, Inside物体数: {len(inside_objects)}")
     
     # 执行物理模拟（使用默认的world_settings）

@@ -31,3 +31,4 @@ demo/demo_5.png
 # 这些不排除在外 保持更新
 !asset_data/imaginarium_asset_info.csv
 !config/config-example.yaml
+batch_process_images.sh
