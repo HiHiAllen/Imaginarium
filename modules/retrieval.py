@@ -26,18 +26,38 @@ from modules._s2_legacy_functions import (
 )
 
 class TextureRetrieval:
-    def __init__(self, texture_embeddings_path, processor, model, device):
+    def __init__(self, texture_embeddings_path, processor, model, device, logger=None):
         self.texture_embeddings_path = texture_embeddings_path
         self.processor = processor
         self.model = model
         self.device = device
+        self.logger = logger
         self.embeddings = self._load_embeddings()
         
     def _load_embeddings(self):
         if not os.path.exists(self.texture_embeddings_path):
             raise FileNotFoundError(f"Texture embeddings not found at {self.texture_embeddings_path}")
+        
+        # 获取文件大小
+        file_size_mb = os.path.getsize(self.texture_embeddings_path) / (1024 * 1024)
+        if self.logger:
+            self.logger.info(f"  正在加载纹理embedding文件 ({file_size_mb:.1f} MB)，请稍候...")
+        else:
+            print(f"  正在加载纹理embedding文件 ({file_size_mb:.1f} MB)，请稍候...")
+        
+        import time
+        start_time = time.time()
+        
         with open(self.texture_embeddings_path, 'rb') as f:
-            return pickle.load(f)
+            embeddings = pickle.load(f)
+        
+        elapsed_time = time.time() - start_time
+        if self.logger:
+            self.logger.info(f"  ✓ 纹理embedding加载完成 (耗时 {elapsed_time:.2f}s)")
+        else:
+            print(f"  ✓ 纹理embedding加载完成 (耗时 {elapsed_time:.2f}s)")
+        
+        return embeddings
 
     def _extract_feature(self, image):
         inputs = self.processor(images=image, return_tensors="pt").to(self.device)
@@ -284,12 +304,12 @@ class TextureRetrieval:
         
         # 2. Handle Walls (Individual Retrieval -> Best Score)
         if wall_files:
-            print(f"Found {len(wall_files)} walls. Retrieving individually to find best match...")
+            print(f"  发现 {len(wall_files)} 个墙面，正在检索最佳匹配纹理...")
             
             best_wall_texture = None
             best_wall_score = -float('inf')
             
-            for obj_name, mask_file in wall_files:
+            for obj_name, mask_file in tqdm(wall_files, desc="  检索墙面纹理"):
                 crop, area = self._get_masked_crop(ori_image, mask_file)
                 # Ignore very small crops
                 if crop and area > 100:
@@ -299,15 +319,18 @@ class TextureRetrieval:
                         best_wall_texture = texture_path
             
             if best_wall_texture and best_wall_score >= 0.5:
-                print(f"  Selected best wall texture: {os.path.basename(best_wall_texture)} (score: {best_wall_score:.4f})")
+                print(f"  ✓ 已选择最佳墙面纹理: {os.path.basename(best_wall_texture)} (分数: {best_wall_score:.4f})")
                 # Assign to ALL walls
                 for obj_name, _ in wall_files:
                     results[obj_name] = best_wall_texture
             else:
-                print("  Failed to retrieve wall texture (no valid crops?).")
+                print("  ✗ 墙面纹理检索失败 (无有效裁剪区域?)")
                 
         # 3. Handle Others (Individual Texture)
-        for obj_name, mask_file in tqdm(other_files, desc="Retrieving floor/ceiling textures"):
+        if other_files:
+            print(f"  发现 {len(other_files)} 个地板/天花板，正在检索纹理...")
+        
+        for obj_name, mask_file in tqdm(other_files, desc="  检索地板/天花板纹理"):
             category = None
             if re.match(r'(floor)_\d+', obj_name):
                 category = 'floor'
@@ -324,6 +347,8 @@ class TextureRetrieval:
         # Save results
         with open(output_path, 'w') as f:
             json.dump(results, f, indent=2)
+        
+        print(f"  ✓ 纹理检索完成，共检索到 {len(results)} 个对象的纹理")
             
         return results
 
@@ -402,30 +427,155 @@ class RetrievalModule:
         )
         
         # 4. Texture Retrieval for Wall/Floor/Ceiling
-        self.logger.info("Running texture retrieval for walls, floors, and ceilings...")
-        texture_embeddings_path = self.cfg.get(
-            'texture_embeddings_path', 
-            "asset_data/background_texture_dataset/texture_embeddings.pkl"
-        )
-        masks_folder = os.path.join(input_folder, 'masks')
-        ori_image_path = os.path.join(input_folder, 'ori.png')
-        texture_output_path = os.path.join(save_folder, 'texture_retrieval_results.json')
         
-        texture_retriever = TextureRetrieval(
-            texture_embeddings_path=texture_embeddings_path,
-            processor=processor,
-            model=model,
-            device=model.device
-        )
-        texture_retriever.process_scene(
-            masks_folder=masks_folder,
-            ori_image_path=ori_image_path,
-            output_path=texture_output_path
-        )
+        # # Old DINOv2-based retrieval logic (kept for reference)
+        # # 下面是基于dinov2的背景贴图检索，效果不好；可能不如用clip做图文检索准
+        # self.logger.info("Running texture retrieval for walls, floors, and ceilings...")
+        # texture_embeddings_path = self.cfg.get(
+        #     'texture_embeddings_path', 
+        #     "asset_data/background_texture_dataset/texture_embeddings.pkl"
+        # )
+        # masks_folder = os.path.join(input_folder, 'masks')
+        # ori_image_path = os.path.join(input_folder, 'ori.png')
+        # texture_output_path = os.path.join(save_folder, 'texture_retrieval_results.json')
+        
+        # texture_retriever = TextureRetrieval(
+        #     texture_embeddings_path=texture_embeddings_path,
+        #     processor=processor,
+        #     model=model,
+        #     device=model.device,
+        #     logger=self.logger
+        # )
+        # texture_retriever.process_scene(
+        #     masks_folder=masks_folder,
+        #     ori_image_path=ori_image_path,
+        #     output_path=texture_output_path
+        # )
+        # self.logger.info(f"Texture retrieval results saved to {texture_output_path}")
+        # # Store results in Context for Next Step
+        # retrieval_res = load_json(os.path.join(save_folder, 'retrieval_results_final.json'))
+        # self.context.set_data('retrieval_results', retrieval_res)
+        
+        # 4b. Texture Retrieval for Wall/Floor/Ceiling (VLM-based)
+        texture_results = self.retrieve_textures_with_vlm(input_folder)
+        
+        # Map generic categories to specific object instances
+        retrieval_res_path = os.path.join(save_folder, 'retrieval_results_final.json')
+        if os.path.exists(retrieval_res_path):
+            retrieval_res = load_json(retrieval_res_path)
+        else:
+            retrieval_res = {}
+        
+        # Build mapping from generic categories to specific object instances
+        texture_results_mapped = {}
+        import re
+        for obj_name in retrieval_res.keys():
+            category = None
+            if re.match(r'^wall_\d+$', obj_name):
+                category = 'wall'
+            elif re.match(r'^floor_\d+$', obj_name):
+                category = 'floor'
+            elif re.match(r'^ceiling_\d+$', obj_name):
+                category = 'ceiling'
+                
+            if category and category in texture_results:
+                texture_results_mapped[obj_name] = texture_results[category]
+        
+        # Save texture results to separate file (with object instance names)
+        texture_output_path = os.path.join(save_folder, 'texture_retrieval_results.json')
+        save_json(texture_results_mapped, texture_output_path)
         self.logger.info(f"Texture retrieval results saved to {texture_output_path}")
-
+        
         # Store results in Context for Next Step
-        retrieval_res = load_json(os.path.join(save_folder, 'retrieval_results_final.json'))
         self.context.set_data('retrieval_results', retrieval_res)
         
         self.logger.info("Asset Retrieval Done.")
+
+    def retrieve_textures_with_vlm(self, input_folder):
+        """
+        Use VLM to retrieve textures for walls, floors, and ceilings.
+        """
+        self.logger.info("Running texture retrieval with VLM...")
+        
+        dataset_root = self.shared_cfg.get('background_texture_dataset_path', "asset_data/background_texture_dataset")
+        captions_path = os.path.join(dataset_root, "texture_captions.json")
+        
+        if not os.path.exists(captions_path):
+            self.logger.warning(f"Texture captions not found at {captions_path}. Skipping VLM texture retrieval.")
+            return {}
+            
+        try:
+            with open(captions_path, 'r', encoding='utf-8') as f:
+                captions = json.load(f)
+        except Exception as e:
+            self.logger.error(f"Failed to load texture captions: {e}")
+            return {}
+            
+        ori_image_path = os.path.join(input_folder, 'ori.png')
+        if not os.path.exists(ori_image_path):
+             self.logger.warning(f"Original image not found at {ori_image_path}")
+             return {}
+             
+        # Resize image to 512x512
+        try:
+            image = Image.open(ori_image_path).convert("RGB")
+            image = image.resize((512, 512))
+        except Exception as e:
+            self.logger.error(f"Failed to process image: {e}")
+            return {}
+        
+        # Construct Prompt
+        captions_text = json.dumps(captions, indent=2, ensure_ascii=False)
+        
+        prompt = (
+            "You are an interior design expert. "
+            "I will provide an image of a room and a list of available background textures with their descriptions. "
+            "Please select the most suitable texture for the 'ceiling', 'floor', and 'wall'. "
+            "For the wall, select one texture that fits all walls in the room. "
+            "Consider the color and style of the room. "
+            f"Available textures:\n{captions_text}\n\n"
+            "Return a JSON object with keys 'ceiling', 'floor', 'wall' and the selected texture filename (key from the provided list) as values. "
+            "Example: {\"ceiling\": \"ceiling/texture1.jpg\", \"floor\": \"floor/texture2.jpg\", \"wall\": \"wall/texture3.jpg\"}"
+        )
+        
+        # Call VLM
+        try:
+            response = self.context.gpt.get_response(prompt, image=image)
+            
+            # Parse JSON
+            import re
+            json_match = re.search(r'\{[\s\S]*\}', response)
+            if json_match:
+                result_str = json_match.group()
+                # Fix common JSON errors if any (e.g. single quotes)
+                try:
+                    result = json.loads(result_str)
+                except json.JSONDecodeError:
+                    # Try eval as fallback for single quotes
+                    try:
+                        import ast
+                        result = ast.literal_eval(result_str)
+                    except:
+                        self.logger.error(f"Failed to parse VLM response JSON: {result_str}")
+                        return {}
+                
+                self.logger.info(f"VLM Texture Selection: {result}")
+                
+                final_result = {}
+                for cat in ['ceiling', 'floor', 'wall']:
+                    if cat in result:
+                         tex_path = result[cat]
+                         full_path = os.path.join(dataset_root, tex_path)
+                         if os.path.exists(full_path):
+                             final_result[cat] = full_path
+                         else:
+                             self.logger.warning(f"Selected texture {tex_path} not found at {full_path}.")
+                             
+                return final_result
+            else:
+                self.logger.error("No JSON found in VLM response.")
+                return {}
+                
+        except Exception as e:
+            self.logger.error(f"Error in VLM texture retrieval: {e}")
+            return {}

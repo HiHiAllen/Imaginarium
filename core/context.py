@@ -347,7 +347,7 @@ class Context:
             'model': self.config.shared.gpt_model,
             'GPT_KEY': self.config.shared.gpt_key,
             'GPT_ENDPOINT': self.config.shared.gpt_endpoint,
-            'use_openai_client': True
+            'use_openai_client': self.config.shared.use_openai_client
         }
     
     @property

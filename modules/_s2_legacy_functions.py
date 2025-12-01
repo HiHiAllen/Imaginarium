@@ -411,12 +411,36 @@ def cal_embedding_sim(detected_item_list, all_detected_item_images_features, ite
     
     asset_features_cache = {}
     logger.info(f"Pre-loading {len(all_candidate_names)} unique asset features into memory...")
-    for asset_name in tqdm(list(all_candidate_names)):
+    
+    # 并行加载优化
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
+    def load_single_asset(asset_name):
+        """单个资产的加载函数"""
         asset_embedding_path = os.path.join(asset_embedding_folder, f"{asset_name}.pt")
         if os.path.exists(asset_embedding_path):
-            # Load and move to device immediately
-            asset_features_cache[asset_name] = [f.to(device) for f in torch.load(asset_embedding_path, map_location='cpu')]
-    logger.info("Asset features loaded.")
+            try:
+                features = torch.load(asset_embedding_path, map_location='cpu')
+                return asset_name, features
+            except Exception as e:
+                logger.warning(f"Failed to load {asset_name}: {e}")
+                return None, None
+        return None, None
+    
+    # 使用线程池并行加载（IO密集型任务）
+    max_workers = min(16, len(all_candidate_names))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(load_single_asset, name): name 
+                   for name in all_candidate_names}
+        
+        # 收集结果并显示进度
+        for future in tqdm(as_completed(futures), total=len(futures)):
+            asset_name, features = future.result()
+            if features is not None:
+                # 移动到设备
+                asset_features_cache[asset_name] = [f.to(device) for f in features]
+    
+    logger.info(f"Asset features loaded. Loaded {len(asset_features_cache)} assets.")
 
     # 3. Group detected items by their base category to process them in efficient batches.
     category_to_items = defaultdict(list)

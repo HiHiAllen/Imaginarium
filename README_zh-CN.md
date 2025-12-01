@@ -184,7 +184,7 @@ python scripts/precompute_voxels.py \
 > *先决条件：需要 `imaginarium_assets`。*
 > 时间：约 20 分钟（取决于磁盘速度）
 ```bash
-blender --background --python scripts/convert_fbx_to_blend.py -- --fbx_dir asset_data/imaginarium_assets
+blender --background --python scripts/convert_fbx_to_blend.py -- --fbx_dir asset_data/imaginarium_assets --parallel --workers 8
 ```
 
 ### 3. 模型 Checkpoints

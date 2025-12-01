@@ -197,8 +197,146 @@ class GPTApi(BaseApi):
         if self.use_openai_client:
             return self._get_response_with_openai_client(prompt, image, history, return_history, only_return_request, **kwargs)
         
-        # Fallback to requests if needed (omitted for brevity, assuming OpenAI client is preferred)
-        raise NotImplementedError("Only OpenAI Client mode is fully migrated for this refactor.")
+        # Fallback to requests mode for non-OpenAI client usage
+        if isinstance(image, list):
+            if not isinstance(prompt, list):
+                prompts, images = prompt.split(IMAGE_PLACEHOLDER), image
+            else:
+                prompts, images = prompt, image
+                
+            if images is None:
+                images = [None] * len(prompts)
+
+            if len(prompts) != len(images) + 1:
+                raise ValueError(f"prompts and images must have the same length, {len(prompts)} != {len(images)}")
+            
+            content = []
+            content.append({"type": "text", "text": prompts[0]})
+            for prompt_part, image_part in zip(prompts[1:], images):
+                encoded_image = GPTApi.encode_image(image_part)
+                if encoded_image:
+                    content.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{encoded_image}"
+                        },
+                    })
+                content.append({"type": "text", "text": prompt_part})
+            payload = {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": content,
+                    },
+                ],
+            }
+            
+        elif isinstance(image, np.ndarray):
+            if image is not None and image.size > 0:
+                encoded_image = GPTApi.encode_image(image)
+                payload = {
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/jpeg;base64,{encoded_image}"
+                                    },
+                                },
+                                {"type": "text", "text": prompt},
+                            ],
+                        },
+                    ],
+                }
+            else:
+                payload = {
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt},
+                            ],
+                        },
+                    ],
+                }
+        else:
+            if image:
+                encoded_image = GPTApi.encode_image(image)
+                payload = {
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/jpeg;base64,{encoded_image}"
+                                    },
+                                },
+                                {"type": "text", "text": prompt},
+                            ],
+                        },
+                    ],
+                }
+            else:
+                payload = {
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt},
+                            ],
+                        },
+                    ],
+                }
+
+        if history:
+            history.append(payload['messages'][0])
+            payload['messages'] = history
+        else:
+            payload['messages'].insert(0, self.system_message)
+            
+        temperature = kwargs.get("temperature", 0)
+        max_tokens = kwargs.get("max_tokens", 2048)
+        top_p = kwargs.get("top_p", 0.95)
+        
+        payload['temperature'] = temperature
+        payload['max_tokens'] = max_tokens
+        payload['top_p'] = top_p
+        payload['model'] = self.current_model
+        
+        if only_return_request:
+            return payload['messages']
+        
+        # Send request with retry mechanism
+        max_retries = kwargs.get("max_retries", 5)
+        retry_delay = 1
+        for retry in range(max_retries):
+            try:
+                start_time = time.time()
+                response = requests.post(self.GPT_ENDPOINT, headers=self.headers, data=json.dumps(payload))
+                response.raise_for_status()
+                print(f"GPT Time cost {time.time() - start_time}s.")
+                full_text = response.json()["choices"][0]["message"]["content"]
+                if full_text:
+                    if not return_history:
+                        return full_text
+                    else:
+                        cur_answer = {"role": "assistant", "content": [{"type": "text", "text": full_text}]}
+                        payload['messages'].append(cur_answer)
+                        return full_text, payload['messages']
+                
+            except Exception as e:
+                print(
+                    f"Error when sending request to the server (Retry {retry+1}/{max_retries}):",
+                    e,
+                    flush=True,
+                )
+                if retry < max_retries - 1:
+                    time.sleep(retry_delay)
+        return None
 
 def parallel_processing_requests(agent_params,all_image_list, all_prompt_list, return_list, return_json, return_dict, num_processes=8):
     args_list = [(prompt, image_list) for prompt, image_list in zip(all_prompt_list, all_image_list)]
