@@ -14,6 +14,8 @@ pigz -dc ./third_party/blender-4.3.2-linux-x64.tar.gz | tar xvf - -C ./third_par
 
 sh blender_install.sh
 
+sudo yum install -y libSM libXext libXrender libXi libXxf86vm mesa-libGL
+
 # 配置权重
 huggingface-cli download binicey/Imaginarium-3D-Derived-Dataset \
     ae_net_pretrained_weights.pth \
@@ -43,3 +45,19 @@ huggingface-cli download HiHiAllen/Imaginarium-Dataset \
 
 
 pigz -dc ./asset_data/background_texture_dataset.tar.gz | tar xvf - -C ./asset_data/ | pv -l -s $(tar -tzf ./asset_data/background_texture_dataset.tar.gz | wc -l) > /dev/null
+
+
+
+# asset info
+huggingface-cli download HiHiAllen/Imaginarium-Dataset \
+    imaginarium_3d_scene_layout_dataset_part1.tar.gz \
+    imaginarium_3d_scene_layout_dataset_part2.tar.gz \
+    imaginarium_3d_scene_layout_dataset_part3.tar.gz \
+    imaginarium_3d_scene_layout_dataset_part4.tar.gz \
+    --repo-type dataset \
+    --local-dir ./asset_data \
+    --local-dir-use-symlinks False
+
+for f in ./asset_data/imaginarium_3d_scene_layout_dataset_part*.tar.gz; do
+pigz -dc "$f" | tar xvf - -C ./asset_data/imaginarium | pv -l -s "$(tar -tzf "$f" | wc -l)" > /dev/null
+done

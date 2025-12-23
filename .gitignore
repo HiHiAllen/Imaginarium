@@ -14,6 +14,7 @@ third_party/
 saved_results/
 logs/
 third_party/*
+debug*
 
 # 个人文件
 config/config_previous_dataset.yaml

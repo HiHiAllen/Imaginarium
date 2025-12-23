@@ -1,3 +1,7 @@
+> **Update (2025.12.23):** Fixed some size and scale errors in the scene dataset and 3D asset dataset. Please re-download the updates.
+>
+> **Todo:** We have cleaned and remade 3D assets with potential copyright risks and updated the scene layout dataset accordingly. Due to these changes, the codebase will be updated after recent tuning. Please stay tuned.
+
 <div align="center">
 
 # Imaginarium: Vision-guided High-Quality 3D Scene Layout Generation
@@ -33,7 +37,6 @@ We have recently optimized and adjusted the codebase compared to the original pa
 - **Scene Graph "Groups"**: Introduced the concept of "Groups". Objects with repetitive visual features and similar semantics now share the same asset retrieval results, ensuring consistency (e.g., matching all dining chairs to the same asset).
 - **Enhanced 3D Asset Retrieval**: Implemented a dual-mechanism retrieval system using both Local and Global image feature matching, combined with VLM for object size optimization. This improves robustness against occlusion and complex scenes.
 - **Copyright Clearance**: We have cleaned and remade 3D assets with potential copyright risks and updated the 3D scene layout dataset accordingly.
-- **🔄 Code & Dataset Updates**: Due to partial changes in 3D scenes and assets, the codebase will be updated after recent optimizations. Please stay tuned for the latest version.
 
 ## 🛠️ Installation
 
