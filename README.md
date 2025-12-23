@@ -275,15 +275,8 @@ If you’d like to fine-tune Flux on your own dataset, we provide a training scr
 2. **Launch training**:
 
 ```bash
-accelerate launch scripts/train_imaginarium_flux.py \
-  --pretrained_model_name_or_path "black-forest-labs/FLUX.1-dev" \
-  --dataset_name "your_dataset_name" \
-  --output_dir "flux-finetuned" \
-  --mixed_precision "bf16" \
-  --num_train_epochs 15 \
-  --rank 16 \
-  --learning_rate 1e-4 \
-  --resolution 1024
+cd scripts/flux
+bash train.sh
 ```
 
 ---

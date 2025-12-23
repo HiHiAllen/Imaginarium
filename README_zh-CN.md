@@ -266,9 +266,6 @@ python run_imaginarium_I2Layout.py demo/demo_0.png --clean
 python run_imaginarium_I2Layout.py demo/demo_0.png --clean --debug
 ```
 
----
-
-下面给出“微调 FLUX”这一节的优化版本，中英文对照，并配上相应 Emoji，使其风格与原文档保持一致。  
 
 ---
 
@@ -279,15 +276,8 @@ python run_imaginarium_I2Layout.py demo/demo_0.png --clean --debug
 2. **运行训练**：
 
 ```bash
-accelerate launch scripts/train_imaginarium_flux.py \
-  --pretrained_model_name_or_path "black-forest-labs/FLUX.1-dev" \
-  --dataset_name "your_dataset_name" \
-  --output_dir "flux-finetuned" \
-  --mixed_precision "bf16" \
-  --num_train_epochs 15 \
-  --rank 16 \
-  --learning_rate 1e-4 \
-  --resolution 1024
+cd scripts/flux
+bash train.sh
 ```
 
 ---
