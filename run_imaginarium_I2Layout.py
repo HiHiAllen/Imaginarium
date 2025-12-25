@@ -4,12 +4,12 @@ Imaginarium CLI Entry Point
 Imaginarium 命令行入口
 
 用法 / Usage:
-    python run_imaginarium_I2Layout_I2Layout.py <image_path> [--debug] [--clean]
+    python run_imaginarium_I2Layout.py <image_path> [--debug] [--clean]
     
 示例 / Example:
-    python run_imaginarium_I2Layout_I2Layout.py demo_images/demo_4.png  # 默认从现有结果继续 / Default: resume from existing results
-    python run_imaginarium_I2Layout_I2Layout.py demo_images/demo_4.png --debug  # 输出详细的中间结果, 影响速度 / Output detailed intermediate results, slow down the speed
-    python run_imaginarium_I2Layout_I2Layout.py demo_images/demo_4.png --clean  # 清空文件夹, 从头开始 / Clean output folder and start fresh
+    python run_imaginarium_I2Layout.py demo/demo_0.png  # 默认从现有结果继续 / Default: resume from existing results
+    python run_imaginarium_I2Layout.py demo/demo_0.png --debug  # 输出详细的中间结果, 影响速度 / Output detailed intermediate results, slow down the speed
+    python run_imaginarium_I2Layout.py demo/demo_0.png --clean  # 清空文件夹, 从头开始 / Clean output folder and start fresh
 """
 
 import argparse
@@ -24,16 +24,16 @@ def main():
         epilog="""
 Examples:
   # Normal mode (resume from existing results by default)
-  python run_imaginarium_I2Layout_I2Layout.py demo/demo_4.png
+  python run_imaginarium_I2Layout.py demo/demo_0.png
   
   # Debug mode (save all visualizations)
-  python run_imaginarium_I2Layout_I2Layout.py demo/demo_4.png --debug
+  python run_imaginarium_I2Layout.py demo/demo_0.png --debug
   
   # Clean start (clear output folder and regenerate everything)
-  python run_imaginarium_I2Layout_I2Layout.py demo/demo_4.png --clean
+  python run_imaginarium_I2Layout.py demo/demo_0.png --clean
   
   # Clean start with debug mode
-  python run_imaginarium_I2Layout_I2Layout.py demo/demo_4.png --debug --clean
+  python run_imaginarium_I2Layout.py demo/demo_0.png --debug --clean
   
 For more information, visit: https://github.com/yourrepo/imaginarium
         """

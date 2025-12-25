@@ -560,7 +560,7 @@ def hierarchical_traversal_of_scene_objs(image, class_en_list, task_id=None):
     
     scene_graph_dict_result = None
     for _ in range(3):
-        response = gpt.get_response(prompt, image, temperature=0.7, max_tokens=2048)
+        response = gpt.get_response(prompt, image, temperature=0.7)
         logger.info(f'图片解析json内容为:\n{response}')
         scene_graph_dict_result = extract_json_with_re(response)
         if scene_graph_dict_result:

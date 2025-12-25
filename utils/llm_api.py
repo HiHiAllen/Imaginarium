@@ -299,7 +299,7 @@ class GPTApi(BaseApi):
             payload['messages'].insert(0, self.system_message)
             
         temperature = kwargs.get("temperature", 0)
-        max_tokens = kwargs.get("max_tokens", 2048)
+        max_tokens = kwargs.get("max_tokens", 8192)
         top_p = kwargs.get("top_p", 0.95)
         
         payload['temperature'] = temperature

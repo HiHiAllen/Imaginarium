@@ -3938,20 +3938,12 @@ def layout(obj_placement_info_json_path, placeable_area_info_folder, base_fbx_pa
             if info.get("againstWall") or instance_id in directly_facing_objects:
                 continue
             else:
-                # 否则作为active
+                # 否则作为active候选
                 obj = bpy.data.objects[instance_id]
-                current_matrix = Matrix(info["pose_matrix_for_blender"])
-                current_matrix[2][3] += 0.02  # z坐标 +0.01
-                obj.matrix_world = current_matrix
-                info["pose_matrix_for_blender"] = [list(row) for row in current_matrix]
                 active_objects.append(obj)
         else:
-            # 非一级物体（二级及以上）也作为active
+            # 非一级物体（二级及以上）也作为active候选
             obj = bpy.data.objects[instance_id]
-            current_matrix = Matrix(info["pose_matrix_for_blender"])
-            current_matrix[2][3] += 0.02  # z坐标 +0.01
-            obj.matrix_world = current_matrix
-            info["pose_matrix_for_blender"] = [list(row) for row in current_matrix]
             active_objects.append(obj)
     
     # 3. 剩下的所有物体作为passive物体（排除inside_objects和carpet/rug）
@@ -3969,8 +3961,9 @@ def layout(obj_placement_info_json_path, placeable_area_info_folder, base_fbx_pa
             obj = bpy.data.objects[instance_id]
             passive_objects.append(obj)
     
-    # 4. 检测active物体与其他物体的干涉，有干涉的转为passive
-    print("[PhysicsSimulation] 检测物体干涉...")
+    # 4. 检测active物体是否真正浮空：向下移动0.5cm后检测干涉
+    # 如果下移后与其他物体有干涉，说明物体接近支撑面，不是真正浮空，转为passive
+    print("[PhysicsSimulation] 检测物体是否真正浮空（向下移动0.5cm检测干涉）...")
     
     # 收集所有非active物体（passive + inside）用于碰撞检测
     other_objects = passive_objects.copy()
@@ -3978,37 +3971,41 @@ def layout(obj_placement_info_json_path, placeable_area_info_folder, base_fbx_pa
         obj = bpy.data.objects[instance_id]
         other_objects.append(obj)
     
-    # 预计算所有物体的bbox信息
+    # 预计算passive/inside物体的bbox信息
     print(f"[PhysicsSimulation] 预计算bbox信息...")
-    active_bboxes = {obj: get_bbox_info(obj) for obj in active_objects}
     other_bboxes = {obj: get_bbox_info(obj) for obj in other_objects}
     
-    # 检查每个active物体是否与其他物体（包括其他active物体）有干涉
+    # 检查每个active物体下移0.5cm后是否与其他物体有干涉
     active_to_remove = []
-    collision_count = 0
+    floating_count = 0
+    drop_distance = 0.01  # 0.5cm = 0.01米
     
     for i, active_obj in enumerate(active_objects):
+        # 临时将物体向下移动0.5cm
+        original_matrix = active_obj.matrix_world.copy()
+        temp_matrix = original_matrix.copy()
+        temp_matrix[2][3] -= drop_distance
+        active_obj.matrix_world = temp_matrix
+        
+        # 获取下移后的bbox
+        active_bbox = get_bbox_info(active_obj)
+        
         has_collision = False
-        active_bbox = active_bboxes[active_obj]
         
-        # 检测对象列表：包括其他active物体（避免重复检测）+ passive/inside物体
-        check_objects = []
-        
-        # 1. 添加其他active物体（只检测索引更大的，避免重复）
-        for j in range(i + 1, len(active_objects)):
-            check_objects.append(active_objects[j])
-        
-        # 2. 添加passive和inside物体
-        check_objects.extend(other_objects)
+        # 检测对象列表：passive/inside物体 + 其他active物体
+        check_objects = other_objects.copy()
+        for j, other_active in enumerate(active_objects):
+            if j != i:
+                check_objects.append(other_active)
         
         # 第一阶段：bbox快速预筛选
         candidates = []
         for other_obj in check_objects:
-            # 获取bbox信息
-            if other_obj in active_bboxes:
-                other_bbox = active_bboxes[other_obj]
-            else:
+            # 获取bbox信息（对于其他active物体需要临时计算）
+            if other_obj in other_bboxes:
                 other_bbox = other_bboxes[other_obj]
+            else:
+                other_bbox = get_bbox_info(other_obj)
             
             if check_bbox_overlap_fast(active_bbox, other_bbox):
                 candidates.append(other_obj)
@@ -4018,30 +4015,29 @@ def layout(obj_placement_info_json_path, placeable_area_info_folder, base_fbx_pa
             for other_obj in candidates:
                 if check_mesh_overlap_bvh(active_obj, other_obj):
                     has_collision = True
-                    collision_count += 1
-                    print(f"[PhysicsSimulation] 检测到干涉: {active_obj.name} <-> {other_obj.name}")
-                    # 如果碰撞的是另一个active物体，也把它标记为需要移除
-                    if other_obj in active_objects and other_obj not in active_to_remove:
-                        active_to_remove.append(other_obj)
+                    print(f"[PhysicsSimulation] {active_obj.name} 下移0.5cm后与 {other_obj.name} 干涉，判定为非浮空")
                     break
         
+        # 恢复物体原始位置
+        active_obj.matrix_world = original_matrix
+        
         if has_collision:
+            # 物体不是真正浮空，转为passive
             active_to_remove.append(active_obj)
+        else:
+            # 物体是真正浮空的
+            floating_count += 1
+            print(f"[PhysicsSimulation] {active_obj.name} 是真正浮空物体")
     
-    # 将有干涉的物体从active转移到passive
+    # 将非浮空物体从active转移到passive
     if active_to_remove:
-        print(f"[PhysicsSimulation] 将 {len(active_to_remove)} 个有干涉的物体转为passive（共检测到 {collision_count} 对碰撞）")
+        print(f"[PhysicsSimulation] 将 {len(active_to_remove)} 个非浮空物体转为passive")
         for obj in active_to_remove:
-            # 检查对象是否还在active_objects中（避免重复移除）
             if obj in active_objects:
                 active_objects.remove(obj)
                 passive_objects.append(obj)
-                # 恢复原始位置（取消+0.01的抬高）
-                current_matrix = obj.matrix_world.copy()
-                current_matrix[2][3] -= 0.01
-                obj.matrix_world = current_matrix
-    else:
-        print(f"[PhysicsSimulation] 未检测到干涉")
+    
+    print(f"[PhysicsSimulation] 共发现 {floating_count} 个真正浮空的物体需要仿真")
     
     duration = 1  # 默认1秒
     print(f"[PhysicsSimulation] 最终Active物体数: {len(active_objects)}, Passive物体数: {len(passive_objects)}, Inside物体数: {len(inside_objects)}")
