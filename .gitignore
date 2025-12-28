@@ -8,7 +8,7 @@ __pycache__/
 .specstory/
 
 # 文件夹
-asset_data/
+asset_data/*
 weights/
 third_party/
 saved_results/
