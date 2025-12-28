@@ -2105,6 +2105,12 @@ class RelativePoseManager:
         for son_name in sons_list:
             son_obj = bpy.data.objects[son_name]
             
+            # 检查父物体的 scale 是否有 0 分量（会导致矩阵不可逆）
+            parent_scale = list(parent_obj.scale)
+            if 0 in parent_scale or min(abs(s) for s in parent_scale) < 1e-6:
+                print(f"[Warning] Skipping {parent_obj.name} (scale has zero: {parent_scale})")
+                continue
+            
             # 计算相对变换矩阵
             relative_matrix = parent_obj.matrix_world.inverted() @ son_obj.matrix_world
             self.relative_poses[son_name] = relative_matrix
@@ -2346,12 +2352,23 @@ def align_obj_to_closest_subspace(obj_name, closest_subspace_info):
 
     # 获取子空间的z轴
     subspace_z = subspace_matrix.to_3x3().col[2]
+    
+    # 检查 subspace_z 是否为零向量
+    if subspace_z.length < 1e-6:
+        print(f"[Warning] align_obj_to_closest_subspace: subspace {closest_subspace_info['name']} has zero-length z-axis, skipping {obj_name}")
+        return
 
     # 获取物体的三个轴
     obj_axes = [obj.matrix_world.to_3x3().col[i] for i in range(3)]
+    
+    # 过滤掉零长度的轴（可能是 scale 有零分量导致的）
+    valid_axes = [axis for axis in obj_axes if axis.length > 1e-6]
+    if not valid_axes:
+        print(f"[Warning] align_obj_to_closest_subspace: {obj_name} has all zero-length axes (scale={list(obj.scale)}), skipping")
+        return
 
-    # 找到与子空间z轴最接近的物体轴
-    closest_axis = max(obj_axes, key=lambda axis: abs(axis.dot(subspace_z)))
+    # 找到与子空间z轴最接近的物体轴（只在有效轴中选择）
+    closest_axis = max(valid_axes, key=lambda axis: abs(axis.dot(subspace_z)))
 
     # 确保方向正确
     if closest_axis.dot(subspace_z) < 0:
@@ -2359,6 +2376,12 @@ def align_obj_to_closest_subspace(obj_name, closest_subspace_info):
 
     # 计算旋转矩阵
     rotation_axis = closest_axis.cross(subspace_z)
+    
+    # 检查 closest_axis 是否为零向量（理论上不会走到这里，但做个保险）
+    if closest_axis.length < 1e-6:
+        print(f"[Warning] align_obj_to_closest_subspace: {obj_name} closest_axis is zero-length, skipping")
+        return
+    
     angle = closest_axis.angle(subspace_z)
 
     if rotation_axis.length > 0.0001:
@@ -3097,9 +3120,60 @@ def estimate_scale_factors_for_object(obj_name, pcd_obb_size, pose, retrieved_as
     
     # 计算物体局部坐标轴在世界坐标系中的方向
     world_axes_vectors = rotation_matrix @ local_axes
+    abs_vectors = np.abs(world_axes_vectors)
     
-    # 找出物体在世界坐标系中主要对齐的轴
-    alignment = np.argmax(np.abs(world_axes_vectors), axis=1)
+    # 找出物体在世界坐标系中主要对齐的轴（使用贪婪算法确保结果是排列）
+    # 简单的 argmax 可能产生重复值（如[0,0,2]），导致某些轴的 scale 为 0
+    alignment = np.zeros(3, dtype=int)
+    used_cols = set()
+    # 按每行最大值的大小排序，优先分配最确定的轴
+    row_max_vals = np.max(abs_vectors, axis=1)
+    row_order = np.argsort(row_max_vals)[::-1]  # 从最大到最小
+    
+    for row in row_order:
+        # 获取该行的列排序（从大到小）
+        col_order = np.argsort(abs_vectors[row])[::-1]
+        # 找到第一个未被使用的列
+        for col in col_order:
+            if col not in used_cols:
+                alignment[row] = col
+                used_cols.add(col)
+                break
+    
+    # ========== 轴对齐可靠性检测 ==========
+    # 当旋转接近45度时，投影值接近，argmax结果不稳定
+    # 阈值说明：cos(30°)≈0.866, cos(45°)≈0.707
+    # 如果最大投影值与次大投影值的差小于阈值，说明该轴对齐不可靠
+    ALIGNMENT_THRESHOLD = 0.15  # 约对应于主轴偏离超过约40度时触发
+    
+    xy_alignment_reliable = True
+    for i in range(2):  # 只检查X和Y轴（行0和行1），Z轴通常可靠
+        sorted_row = np.sort(abs_vectors[i])[::-1]
+        if sorted_row[0] - sorted_row[1] < ALIGNMENT_THRESHOLD:
+            xy_alignment_reliable = False
+            break
+    
+    # 如果XY轴对齐不可靠，且使用的是 ALIGNED_ANISOTROPIC 策略，则回退到尺寸排序匹配
+    # 其他策略（ISOTROPIC/RADIAL/SORTED_ANISOTROPIC）不依赖轴对齐，无需回退
+    if not xy_alignment_reliable and scaling_strategy == 'ALIGNED_ANISOTROPIC':
+        print(f'[AxisAlignment] {obj_name}: XY轴对齐不可靠，回退到尺寸排序匹配')
+        
+        # 对于XY轴：按尺寸大小匹配（长对长，短对短）
+        # Z轴保持原有的pose对齐
+        pcd_xy = pcd_obb_size[:2]
+        asset_xy = retrieved_asset_bbox_size[:2]
+        
+        # 获取XY方向上从大到小的索引
+        pcd_xy_order = np.argsort(pcd_xy)[::-1]      # pcd中 [大的索引, 小的索引]
+        asset_xy_order = np.argsort(asset_xy)[::-1]  # asset中 [大的索引, 小的索引]
+        
+        # 创建XY的映射：pcd的第i大 对应 asset的第i大
+        xy_mapping = np.zeros(2, dtype=int)
+        for rank in range(2):
+            xy_mapping[pcd_xy_order[rank]] = asset_xy_order[rank]
+        
+        # 组合映射：XY用排序匹配，Z用原有的pose对齐
+        alignment = np.array([xy_mapping[0], xy_mapping[1], alignment[2]])
     
     # 根据对齐情况重新排列retrieved_asset_bbox_size
     reordered_retrieved_asset_bbox_size = retrieved_asset_bbox_size[alignment]
@@ -3127,7 +3201,7 @@ def estimate_scale_factors_for_object(obj_name, pcd_obb_size, pose, retrieved_as
         'reordered_retrieved_asset_bbox_size:', format_list(reordered_retrieved_asset_bbox_size), 
         'reordered_scale_factor:', format_list(reordered_scale_factor),
         'original_scale_factor:', format_list(original_scale_factor))
-    print('scaling_strategy:', scaling_strategy, '\n')
+    print('scaling_strategy:', scaling_strategy, 'xy_alignment_reliable:', xy_alignment_reliable, '\n')
 
     return original_scale_factor
 
@@ -3551,8 +3625,45 @@ def layout(obj_placement_info_json_path, placeable_area_info_folder, base_fbx_pa
             boxes = obj_info['boxes']
             bbox_size = [max(abs(boxes[2]- boxes[0]), 1), max(abs(boxes[3]- boxes[1]), 1)]
             pose_matrix_list = [list(row) for row in obj.matrix_world]
-            scale_factors = estimate_scale_factors_for_object(obj_name, pcd_obb_size, pose_matrix_list, retrieved_asset_bbox_size, bbox_size,
-                            scene_camera_name, scaling_strategy, mask_is_truncated)
+            
+            # ========== 相机坐标系夹角检测 & 自动回退到尺寸排序匹配 ==========
+            original_cam_pose = np.array(obj_placement_info['obj_info'][obj_name]['pose_matrix_for_blender'])
+            cam_rot = original_cam_pose[:3, :3]
+            # 计算物体局部X轴在相机坐标系中与相机X/Y轴的夹角
+            local_x_in_cam = cam_rot[:, 0]  # 第一列是局部X轴在相机系的方向
+            # 与相机X轴(1,0,0)的夹角
+            angle_x_to_camX = np.degrees(np.arccos(np.clip(np.abs(local_x_in_cam[0]), 0, 1)))
+            angle_x_to_camY = np.degrees(np.arccos(np.clip(np.abs(local_x_in_cam[1]), 0, 1)))
+            
+            # 判断是否接近45度（40°~50°范围内认为不稳定）
+            xy_angle_unstable = (40 <= angle_x_to_camX <= 50) or (40 <= angle_x_to_camY <= 50)
+            
+            # 如果相机坐标系下夹角接近45度，直接使用尺寸排序匹配（跳过pose对齐）
+            if xy_angle_unstable and scaling_strategy == 'ALIGNED_ANISOTROPIC':
+                print(f'[CamAngleFix] {obj_name}: 相机系夹角={angle_x_to_camX:.1f}°接近45°, 使用尺寸排序匹配')
+                # 直接按尺寸排序匹配，不经过 estimate_scale_factors_for_object 的 pose 对齐
+                pcd_obb_size_arr = np.array(pcd_obb_size)
+                asset_bbox_size_arr = np.array(retrieved_asset_bbox_size)
+                
+                # 按尺寸从大到小排序
+                pcd_order = np.argsort(pcd_obb_size_arr)[::-1]
+                asset_order = np.argsort(asset_bbox_size_arr)[::-1]
+                
+                # 计算排序后的 scale（大对大，中对中，小对小）
+                sorted_scales = pcd_obb_size_arr[pcd_order] / np.maximum(asset_bbox_size_arr[asset_order], eps)
+                
+                # 映射回原始坐标系
+                scale_factors = np.zeros(3)
+                for i in range(3):
+                    scale_factors[asset_order[i]] = sorted_scales[i]
+                
+                # 应用阈值限制
+                SCALE_THRESHOLD = [0.1, 5]
+                scale_factors = [max(min(s, SCALE_THRESHOLD[1]), SCALE_THRESHOLD[0]) for s in scale_factors]
+                print(f'  sorted_scales: {format_list(sorted_scales)}, final_scale: {format_list(scale_factors)}')
+            else:
+                scale_factors = estimate_scale_factors_for_object(obj_name, pcd_obb_size, pose_matrix_list, retrieved_asset_bbox_size, bbox_size,
+                                scene_camera_name, scaling_strategy, mask_is_truncated)
             obj_info['scale'] = scale_factors
             obj.scale = scale_factors
         
@@ -3596,6 +3707,28 @@ def layout(obj_placement_info_json_path, placeable_area_info_folder, base_fbx_pa
             # bpy.context.view_layer.update()
     
     # ⚡ 性能优化：批量更新场景（替代组内循环的多次更新）
+    bpy.context.view_layer.update()
+    
+    # ========== 安全检查：修复 scale 有零分量的物体 ==========
+    # 某些 FBX 导入后可能有零 scale 分量，会导致后续矩阵计算失败
+    MIN_SCALE = 0.001  # 最小 scale 值
+    for obj_name, obj_info in output_data_s2['obj_info'].items():
+        if obj_name == scene_camera_name:
+            continue
+        obj = bpy.data.objects.get(obj_name)
+        if obj is None:
+            continue
+        scale = list(obj.scale)
+        fixed = False
+        for i in range(3):
+            if abs(scale[i]) < MIN_SCALE:
+                print(f'[Warning] {obj_name}: scale[{i}]={scale[i]} 接近零，修复为 {MIN_SCALE}')
+                scale[i] = MIN_SCALE
+                fixed = True
+        if fixed:
+            obj.scale = scale
+            if 'scale' in obj_info:
+                obj_info['scale'] = scale
     bpy.context.view_layer.update()
         
     # 处理直接面对关系（如果需要）

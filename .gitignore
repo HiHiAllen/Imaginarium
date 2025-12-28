@@ -19,11 +19,7 @@ debug*
 # 个人文件
 config/config_previous_dataset.yaml
 config/config.yaml
- 
-demo/demo_2.png
-demo/demo_3.png
-demo/demo_4.png
-demo/demo_5.png
+
 
 *.pth
 *.tar*

@@ -197,11 +197,7 @@ def visualize(image_pil: Image.Image,
     filtered_image_cont = image_pil_ori.copy()
     filtered_draw_cont = ImageDraw.Draw(filtered_image_cont)
 
-    filtered_image_only_wall_ceiling_floor = image_pil_ori.copy().convert("RGBA")
-    filtered_draw_only_wall_ceiling_floor = ImageDraw.Draw(filtered_image_only_wall_ceiling_floor)
-    
     wall_floor_paint_image = image_pil_ori.copy().convert("RGBA")
-    wall_floor_paint_draw = ImageDraw.Draw(wall_floor_paint_image)
 
     # 计算适合图像大小的字体大小
     font_size = int(min(image_pil_ori.size) / 70)  # 可以调整这个比例
@@ -295,103 +291,7 @@ def visualize(image_pil: Image.Image,
             
             object_bboxes_wo_text_bbox[category] = [x0, y0, x1, y1]
 
-    # 绘制ground|wall|ceiling|floor的mask、文本标签和边界框
-    # 使用自定义字体文件，并设置字体大小
-    # 计算适合图像大小的字体大小
-    font_size = int(min(image_pil_ori.size) / 20)  # 可以调整这个比例
-
-    font = ImageFont.truetype(FONT_TTF_PATH, font_size)
-        
-    for mask, category, box in zip(masks, categorys, boxes):
-        if re.match(r'(ground|wall|ceiling|floor)_\d+', category):
-            # 获取对应类别的颜色
-            fill_color = cate2color[category]
-
-            # 将mask转换为二进制形式，并计算中心点
-            mask_np = np.array(mask)
-            #mask收缩 防止交叉
-            # 定义结构元素（可以选择不同形状和大小）
-            kernel = np.ones((5, 5), np.uint8)  # 3x3 的矩形结构元素
-            # 执行收缩操作
-            mask_np = cv2.erode(mask_np.astype(np.uint8), kernel, iterations=3)
-            #执行膨胀操作
-            mask_np = cv2.dilate(mask_np.astype(np.uint8), kernel, iterations=2)
-            binary_mask = mask_np > 0  if mask_np.ndim == 2 else mask_np[:, :, -1] > 0
-            
-            ys, xs = np.where(binary_mask)
-            center_x, center_y = np.mean(xs), np.mean(ys)
-
-            if xs.size == 0 or ys.size == 0:
-                logger.warning(f"{category}, Empty mask detected, skipping...")
-                continue
-            if np.isnan(center_x) or np.isnan(center_y):
-                logger.warning(f"Invalid center coordinates: center_x={center_x}, center_y={center_y}")
-                continue
-
-            # 绘制mask
-            
-            # 将 NumPy 数组转换为 Pillow 图像
-            base_image = Image.fromarray(mask_np)
-            #绘制透明mask
-            # 创建一个透明图层 (RGBA)
-            overlay = Image.new("RGBA", base_image.size, (0, 0, 0, 0))
-
-            # 在透明图层上绘制半透明内容
-            overlay_draw = ImageDraw.Draw(overlay)
-            
-            fill_color = list(fill_color)
-            fill_color += [50]  # 设置透明度
-            fill_color = tuple(fill_color)
-            # 绘制mask
-            draw_mask(binary_mask, overlay_draw, random_color=False, color=fill_color)
-            
-            # 将透明图层叠加到原始图像上
-            filtered_image_only_wall_ceiling_floor = Image.alpha_composite(filtered_image_only_wall_ceiling_floor, overlay)
-            filtered_draw_only_wall_ceiling_floor = ImageDraw.Draw(filtered_image_only_wall_ceiling_floor)
-            
-            #draw_mask(binary_mask, filtered_draw_only_wall_ceiling_floor, random_color=False, color=fill_color)
-
-            # 绘制边界框
-            x0, y0, x1, y1 = map(int, box)
-            outline_color = (0, 0, 0)
-            # filtered_draw_only_wall_ceiling_floor.rectangle([x0-1, y0-1, x1+1, y1+1], outline=outline_color, width=3)
-            # filtered_draw_only_wall_ceiling_floor.rectangle([x0, y0, x1, y1], outline=fill_color, width=1)
-
-            # 计算文本标签的位置
-            text = category
-            left, top, right, bottom = font.getbbox(text)
-            text_width = right - left
-            text_height = bottom - top
-            text_x = center_x - text_width // 2
-            text_y = center_y - text_height // 2
-
-            # 检查并调整文本位置以避免被边缘裁剪
-            image_width, image_height = image_pil_ori.size
-            if text_x < 0:
-                text_x = 0
-            elif text_x + text_width > image_width:
-                text_x = image_width - text_width
-
-            if text_y < 0:
-                text_y = 0
-            elif text_y + text_height > image_height:
-                text_y = image_height - text_height
-
-            # 调整背景框的大小
-            background_margin = 10  # 增加边距以覆盖黑色边缘
-            filtered_draw_only_wall_ceiling_floor.rectangle(
-                [text_x - background_margin, text_y - background_margin, text_x + text_width + background_margin, text_y + text_height + background_margin * 2],  # 调整高度
-                fill="white"
-            )
-
-            # 重新绘制文本的黑色边缘
-            for offset in [(1, 1), (-1, -1), (1, -1), (-1, 1), (1, 0), (-1, 0), (0, 1), (0, -1)]:
-                filtered_draw_only_wall_ceiling_floor.text((text_x + offset[0], text_y + offset[1]), text, fill="black", font=font)
-
-            # 绘制文本
-            filtered_draw_only_wall_ceiling_floor.text((text_x, text_y), text, fill=fill_color, font=font)
-    
-    #wall_floor_paint
+    # wall_floor_paint: 只绘制墙壁/地板的mask（不带标注）
     for mask, category, box in zip(masks, categorys, boxes):
         if re.match(r'(ground|wall|ceiling|floor)_\d+', category):
             
@@ -420,54 +320,88 @@ def visualize(image_pil: Image.Image,
 
             # 将透明图层叠加到原始图像上
             wall_floor_paint_image = Image.alpha_composite(wall_floor_paint_image, overlay)
+
+    return image_pil, grounding_result, mask_image, filtered_image, filtered_image_cont, wall_floor_paint_image, object_bboxes, object_bboxes_wo_text_bbox, wall_color_name
+
+
+def generate_wall_floor_annotation(save_folder: str, detection_results: dict):
+    """
+    轻量级函数：在 wall_floor_paint.png 基础上添加墙壁/地板标注
+    复用已有的 wall_floor_paint.png，只添加文字标注
+    """
+    wall_floor_paint_path = os.path.join(save_folder, 'wall_floor_paint.png')
+    if not os.path.exists(wall_floor_paint_path):
+        logger.warning(f"wall_floor_paint.png not found at {wall_floor_paint_path}")
+        return
+    
+    # 读取已有的 wall_floor_paint.png
+    wall_floor_paint_image = Image.open(wall_floor_paint_path).convert("RGBA")
+    draw = ImageDraw.Draw(wall_floor_paint_image)
+    
+    # 设置字体
+    font_size = int(min(wall_floor_paint_image.size) / 20)
+    font = ImageFont.truetype(FONT_TTF_PATH, font_size)
+    
+    # 构建颜色映射（按顺序分配，确保一致性）
+    wall_color_dict = {
+        (0, 255, 255): 'cyan',
+        (0, 0, 255): 'blue',
+        (255, 165, 0): 'orange',
+        (128, 0, 128): 'purple',
+        (255, 20, 147): 'pink',
+    }
+    wall_color_list = list(wall_color_dict.keys())
+    cate2color = {}
+    color_idx = 0
+    for cate in detection_results['categorys']:
+        if re.match(r'(ground|wall|ceiling|floor)_\d+', cate) and cate not in cate2color:
+            if color_idx < len(wall_color_list):
+                cate2color[cate] = wall_color_list[color_idx]
+                color_idx += 1
+    
+    masks = detection_results.get('masks', [])
+    categorys = detection_results['categorys']
+    
+    # 添加标注
+    for mask, category in zip(masks, categorys):
+        if not re.match(r'(ground|wall|ceiling|floor)_\d+', category):
+            continue
+        if category not in cate2color:
+            continue
             
+        mask_np = np.array(mask)
+        binary_mask = mask_np > 0 if mask_np.ndim == 2 else mask_np[:, :, -1] > 0
+        ys, xs = np.where(binary_mask)
+        if xs.size == 0 or ys.size == 0:
+            continue
+        
+        center_x, center_y = np.mean(xs), np.mean(ys)
+        text = category
+        left, top, right, bottom = font.getbbox(text)
+        text_width, text_height = right - left, bottom - top
+        text_x = center_x - text_width // 2
+        text_y = center_y - text_height // 2
+        
+        # 边界检查
+        image_width, image_height = wall_floor_paint_image.size
+        text_x = max(0, min(text_x, image_width - text_width))
+        text_y = max(0, min(text_y, image_height - text_height))
+        
+        # 绘制白色背景
+        background_margin = 5
+        draw.rectangle(
+            [text_x - background_margin, text_y - background_margin,
+             text_x + text_width + background_margin, text_y + text_height + background_margin],
+            fill="white"
+        )
+        
+        # 绘制文本
+        fill_color = cate2color[category]
+        draw.text((text_x, text_y), text, fill=fill_color, font=font)
+    
+    # 保存
+    wall_floor_paint_image.save(os.path.join(save_folder, 'wall_floor_paint_with_annotation.png'))
 
-    wall_floor_paint_with_annotation_image = wall_floor_paint_image.copy()
-    wall_floor_paint_with_annotation_draw = ImageDraw.Draw(wall_floor_paint_with_annotation_image)
-
-    # 在 wall_floor_paint_with_annotation_image 上添加注释
-    for mask, category, box in zip(masks, categorys, boxes):
-        if re.match(r'(ground|wall|ceiling|floor)_\d+', category):
-            mask_np = np.array(mask)
-            binary_mask = mask_np > 0 if mask_np.ndim == 2 else mask_np[:, :, -1] > 0
-            ys, xs = np.where(binary_mask)
-            if xs.size == 0 or ys.size == 0:
-                continue
-            
-            center_x, center_y = np.mean(xs), np.mean(ys)
-
-            font.size = 50
-            text = category
-            left, top, right, bottom = font.getbbox(text)
-            text_width = right - left
-            text_height = bottom - top
-            text_x = center_x - text_width // 2
-            text_y = center_y - text_height // 2
-
-            # 检查并调整文本位置以避免被边缘裁剪
-            image_width, image_height = wall_floor_paint_with_annotation_image.size
-            if text_x < 0:
-                text_x = 0
-            elif text_x + text_width > image_width:
-                text_x = image_width - text_width
-
-            if text_y < 0:
-                text_y = 0
-            elif text_y + text_height > image_height:
-                text_y = image_height - text_height
-
-            # 绘制文本背景
-            background_margin = 5
-            wall_floor_paint_with_annotation_draw.rectangle(
-                [text_x - background_margin, text_y - background_margin, text_x + text_width + background_margin, text_y + text_height + background_margin],
-                fill="white"
-            )
-            
-            # 绘制文本
-            fill_color = cate2color[category]
-            wall_floor_paint_with_annotation_draw.text((text_x, text_y), text, fill=fill_color, font=font)
-
-    return image_pil, grounding_result, mask_image, filtered_image, filtered_image_cont, filtered_image_only_wall_ceiling_floor,wall_floor_paint_image, wall_floor_paint_with_annotation_image, object_bboxes, object_bboxes_wo_text_bbox, wall_color_name
 
 def overlap(bbox1, bbox2):
     """Check if two bounding boxes overlap."""
@@ -512,16 +446,13 @@ def save_result_and_partition(image, results, save_folder, box_threshold, save_m
         results['categorys']=output_list
     
     # 注意box_threshold仅在输出图片上体现，所有数据均保存至json和pkl文件
-    image_pil, grounding_result, mask_image, filtered_image, filtered_image_cont, filtered_image_only_wall_ceiling_floor,wall_floor_paint, wall_floor_paint_with_annotation, object_bboxes, object_bboxes_wo_text_bbox,wall_color_name = visualize(image_pil, results, draw_width=2.5, box_threshold=box_threshold)
+    image_pil, grounding_result, mask_image, filtered_image, filtered_image_cont, wall_floor_paint, object_bboxes, object_bboxes_wo_text_bbox, wall_color_name = visualize(image_pil, results, draw_width=2.5, box_threshold=box_threshold)
     grounding_result.save(os.path.join(save_folder, 'bbox_result.png'))
     mask_image.save(os.path.join(save_folder, 'mask_result.png'))
     image_pil.save(os.path.join(save_folder, 'bbox_mask_result.png'))
     filtered_image.save(os.path.join(save_folder, 'filtered_bbox_result.png'))
     filtered_image_cont.save(os.path.join(save_folder, 'filtered_bbox_cont_result.png'))
-    
-    filtered_image_only_wall_ceiling_floor.save(os.path.join(save_folder, 'filtered_bbox_only_wall_ceiling_floor_result.png'))
     wall_floor_paint.save(os.path.join(save_folder, 'wall_floor_paint.png'))
-    wall_floor_paint_with_annotation.save(os.path.join(save_folder, 'wall_floor_paint_with_annotation.png'))
     with open(os.path.join(save_folder, 'wall_color_name.json'), 'w') as f:
         json.dump(wall_color_name, f, indent=2)
     if save_masks_pkl:
@@ -1074,7 +1005,7 @@ def verify_floor_parent_with_vlm(save_folder, scene_graph_result, gpt_params, gr
                 if obj_name in scene_graph_result:
                     if not is_on_floor:  # GPT认为不在地面上
                         objects_to_delete.append(obj_name)
-                        logger.info(f"检测到异常物体 '{obj_name}': GPT认为该物体不在地面上，将被删除")
+                        logger.info(f"检测到异常物体 '{obj_name}': GPT认为该物体不在地面上，将被删除；reason: {result_data['reason']}")
     
     # 5. 从scene_graph_result中删除异常物体
     for obj_name in objects_to_delete:
@@ -2206,6 +2137,10 @@ def run_scene_parsing_pipeline(logger, image_np, depth_image, df, save_folder, p
         part2_2_start_time = time.time()
         generate_mask(save_folder)
         logger.info(f"Part 2.2: generate_mask finished. Time: {time.time() - part2_2_start_time:.2f}s.")
+        
+        # 使用更新后的 final_detection_results 重新生成 wall_floor_paint_with_annotation.png
+        generate_wall_floor_annotation(save_folder, final_detection_results)
+        logger.info("wall_floor_paint_with_annotation.png regenerated with refined masks.")
     
     logger.info(f"Pipeline Step 2 finished. Time: {time.time() - step2_start_time:.2f}s.")
 

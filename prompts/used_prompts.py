@@ -231,21 +231,47 @@ A grid image containing cropped views of several objects. Each object's name is 
 
 **Instructions:**
 1. Carefully examine each object in the grid.
-2. The red bounding box in each image indicates the complete object to be evaluated. Treat everything within the red box as a single, unified object (e.g., a potted plant includes both the plant and its container/vase as one object).
-3. Determine what surface is supporting the bottom of this complete object.
-4. Objects that are clearly supported by furniture (tables, shelves, beds, cabinets, etc.) or hanging on walls should be marked as NOT supported by the floor.
-5. Only mark an object as floor-supported if the bottom of the object (or its base/container) is directly touching the floor.
-6. Objects placed on thin floor coverings (such as rugs, carpets, or mats) should still be considered as supported by the floor.
-7. For each object, return True if it IS supported by the floor, False if it is NOT supported by the floor.
+2. The red bounding box indicates the VISIBLE PORTION of the object in the current view. Due to occlusion, you may only see PART of the object (e.g., only the backrest of a chair when the seat is hidden behind a table).
+
+3. **CRITICAL - Reasoning About Complete Objects:**
+   - You must reason about the ENTIRE object, not just the visible portion.
+   - If you see a chair backrest, the COMPLETE chair (including its base/wheels) is what you should evaluate.
+   - If you see part of a table, consider where the COMPLETE table's legs would rest.
+   - Ask yourself: "Where would the BASE/BOTTOM of this complete object be resting?"
+
+4. **CRITICAL - Occlusion Handling:**
+   - Partial visibility due to occlusion does NOT mean the object is not floor-supported.
+   - Example: A chair backrest visible above a table → The complete chair is still standing on the floor → TRUE
+   - Example: Only the top of a plant visible → The complete plant (with its pot) is likely on the floor → TRUE
+
+5. **Special Object Rules:**
+   - **DOORS:** ALL doors should be considered floor-supported (return TRUE). Doors are installed in door frames with their bottom edge at floor level.
+   - **WINDOWS:** Windows are wall-mounted, NOT floor-supported (return FALSE).
+   - **Floor Coverings:** Objects on rugs, carpets, or mats ARE floor-supported (return TRUE).
+
+6. **Decision Logic:**
+   - Floor-supported (TRUE): The complete object's base/bottom rests on the floor (or floor covering).
+   - NOT floor-supported (FALSE): The complete object is placed ON furniture (tables, shelves, cabinets) or mounted on walls/ceiling.
+
+**Common Examples:**
+- Chair backrest visible (seat hidden by table) → The COMPLETE chair stands on floor → TRUE
+- Office chair partially visible → Office chairs have wheel bases on floor → TRUE
+- Door (any visibility) → Doors are installed at floor level → TRUE
+- Lamp on the floor → TRUE
+- Lamp placed on a table surface → FALSE
+- Book on a shelf → FALSE
+- Picture frame on wall → FALSE
+- Ceiling light → FALSE
 
 **Objects to verify:**
 {object_names}
 
-Now, analyze the provided image and return your assessment in the specified JSON format (JSON only):
+Now, analyze the provided image. For each object, reason about the COMPLETE object (not just visible parts), then return your assessment in JSON format (JSON only):
 ```json
 {{
   "object_name": {{
-    "reason": "Brief explanation of whether the object is supported by the floor",
+    "visible_portion": "Brief description of what part is visible",
+    "complete_object_reasoning": "Where would the base of the COMPLETE object be?",
     "is_floor_supported": true  // or false
   }}
 }}
