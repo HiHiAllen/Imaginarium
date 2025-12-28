@@ -114,6 +114,8 @@ bedroom_01/
 - `background_texture_dataset.tar.gz`（背景贴图数据集）
 - *(可选)* `imaginarium_asset_info_with_render_images.xlsx`（视觉参考）
 
+> **💡 提示：** `imaginarium_asset_info.csv`、`imaginarium_asset_info.xlsx` 和 `imaginarium_asset_info_with_render_images.xlsx` 可能会持续更新。如仅需跑通场景生成流程，使用本仓库中已提供的 `asset_data/imaginarium_asset_info.csv` 即可。
+
 ### 2. 衍生数据准备
 
 算法需要衍生数据：位姿渲染图、DINOv2 嵌入、AENet 嵌入和体素（voxels）。

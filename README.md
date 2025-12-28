@@ -114,6 +114,8 @@ To run the algorithm using our provided weights, you need the 3D Asset Library a
 - `background_texture_dataset.tar.gz`（Background Texture Dataset）
 - *(Optional)* `imaginarium_asset_info_with_render_images.xlsx` (Visual Reference)
 
+> **💡 Tip:** `imaginarium_asset_info.csv`, `imaginarium_asset_info.xlsx`, and `imaginarium_asset_info_with_render_images.xlsx` may be updated over time. For simply running the scene generation pipeline, the `asset_data/imaginarium_asset_info.csv` already included in this repo is sufficient.
+
 ### 2. Derived Data Preparation
 
 The algorithm requires derived data: pose renders, DINOv2 embeddings, AENet embeddings, and voxels.
