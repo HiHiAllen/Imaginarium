@@ -67,7 +67,7 @@ def create_grids_for_size_estimation(objects_data, background_image, masks_folde
     cell_size = 256
     margin = 10
     grid_dim = grid_size * cell_size + (grid_size + 1) * margin
-    font_path = "src/pose_estimation/DejaVuSans-Bold.ttf"
+    font_path = "utils/Arial.ttf"
     try:
         font = ImageFont.truetype(font_path, 20)
     except IOError:

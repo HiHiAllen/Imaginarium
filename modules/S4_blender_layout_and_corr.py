@@ -3627,6 +3627,7 @@ def layout(obj_placement_info_json_path, placeable_area_info_folder, base_fbx_pa
             pose_matrix_list = [list(row) for row in obj.matrix_world]
             
             # ========== 相机坐标系夹角检测 & 自动回退到尺寸排序匹配 ==========
+            # 作用是 当物体局部X轴在相机坐标系中与相机X/Y轴的夹角接近45度时，S1、S2得到的obb的参考尺寸的顺序可能会因旋转的微小差异导致X和Y轴颠倒
             original_cam_pose = np.array(obj_placement_info['obj_info'][obj_name]['pose_matrix_for_blender'])
             cam_rot = original_cam_pose[:3, :3]
             # 计算物体局部X轴在相机坐标系中与相机X/Y轴的夹角
