@@ -1005,7 +1005,7 @@ def verify_floor_parent_with_vlm(save_folder, scene_graph_result, gpt_params, gr
                 if obj_name in scene_graph_result:
                     if not is_on_floor:  # GPT认为不在地面上
                         objects_to_delete.append(obj_name)
-                        logger.info(f"检测到异常物体 '{obj_name}': GPT认为该物体不在地面上，将被删除；reason: {result_data['reason']}")
+                        logger.info(f"检测到异常物体 '{obj_name}': GPT认为该物体不在地面上，将被删除；reason: {result_data.get('complete_object_reasoning', 'N/A')}")
     
     # 5. 从scene_graph_result中删除异常物体
     for obj_name in objects_to_delete:
